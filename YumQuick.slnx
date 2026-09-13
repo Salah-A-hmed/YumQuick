@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="YumQuick.Api/YumQuick.Api.csproj" />
+  <Project Path="YumQuick.Core/YumQuick.Core.csproj" />
+  <Project Path="YumQuick.Data/YumQuick.Data.csproj" />
+</Solution>
