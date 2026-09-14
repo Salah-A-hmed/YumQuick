@@ -31,26 +31,36 @@ namespace YumQuick.Api.Controllers
 
             return Ok(banners);
         }
-
+        public class CreateBannerRequest
+        {
+            public IFormFile Image { get; set; } = null!;
+            public string? Title { get; set; }
+        }
         [HttpPost]
         [Authorize(Roles = "RestaurantManager")]
-        public async Task<IActionResult> CreateBanner([FromForm] IFormFile image, [FromForm] string? title)
+        public async Task<IActionResult> CreateBanner(
+            [FromForm] CreateBannerRequest request)
         {
-            if (image == null || image.Length == 0) return BadRequest("Image is required");
+            if (request.Image == null || request.Image.Length == 0)
+                return BadRequest("Image is required");
 
-            var imageUrl = await _imageService.UploadImageAsync(image);
+            var imageUrl = await _imageService.UploadImageAsync(request.Image);
 
             var banner = new Banner
             {
                 ImageUrl = imageUrl,
-                Title = title,
+                Title = request.Title,
                 IsActive = true
             };
 
             _context.Banners.Add(banner);
             await _context.SaveChangesAsync();
 
-            return Ok(new { Message = "Banner added successfully", BannerId = banner.Id });
+            return Ok(new
+            {
+                Message = "Banner added successfully",
+                BannerId = banner.Id
+            });
         }
     }
 }
