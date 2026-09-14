@@ -8,7 +8,7 @@ namespace YumQuick.Core.Entities
     {
         public int Id { get; set; }
         public string Name { get; set; }
-        public string IconUrl { get; set; }
+        public string? IconUrl { get; set; }
 
         // Self-Referencing for Sub-categories
         public int? ParentCategoryId { get; set; }

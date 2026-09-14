@@ -17,8 +17,8 @@ namespace YumQuick.Core.DTOs
         [Required, MinLength(6)]
         public string Password { get; set; }
 
-        public string Role { get; set; }
+        public string? Role { get; set; }
 
-        public IFormFile Avatar { get; set; }
+        public IFormFile? Avatar { get; set; }
     }
 }
