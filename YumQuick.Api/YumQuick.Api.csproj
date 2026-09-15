@@ -4,6 +4,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- SixLabors ImageSharp Community License -->
+    <SixLaborsLicenseKey>Community</SixLaborsLicenseKey>
   </PropertyGroup>
 
 
