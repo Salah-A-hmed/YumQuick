@@ -11,8 +11,7 @@ namespace YumQuick.Core.Entities
         public Cart Cart { get; set; }
         public int ProductId { get; set; }
         public Product Product { get; set; }
-        public int? VariantId { get; set; }
-        public ProductVariant Variant { get; set; }
+        public ICollection<CartItemVariant> SelectedVariants { get; set; } = new List<CartItemVariant>();
         public int Quantity { get; set; }
     }
 }

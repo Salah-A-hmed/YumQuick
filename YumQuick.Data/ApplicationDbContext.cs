@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using System.Reflection.Emit;
 using YumQuick.Core.Entities;
 
 namespace YumQuick.Data
@@ -16,6 +17,7 @@ namespace YumQuick.Data
         public DbSet<Favorite> Favorites { get; set; }
         public DbSet<Cart> Carts { get; set; }
         public DbSet<CartItem> CartItems { get; set; }
+        public DbSet<CartItemVariant> CartItemVariants { get; set; }
         public DbSet<Order> Orders { get; set; }
         public DbSet<OrderItem> OrderItems { get; set; }
         public DbSet<Review> Reviews { get; set; }
@@ -84,6 +86,12 @@ namespace YumQuick.Data
                 .HasOne(r => r.User)
                 .WithMany()
                 .HasForeignKey(r => r.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<CartItemVariant>()
+                .HasOne(cv => cv.Variant)
+                .WithMany()
+                .HasForeignKey(cv => cv.VariantId)
                 .OnDelete(DeleteBehavior.Restrict);
         }
     }
