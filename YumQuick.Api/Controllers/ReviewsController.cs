@@ -26,7 +26,6 @@ namespace YumQuick.Api.Controllers
         {
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
-            // 1. التأكد إن الأوردر موجود وبتاع العميل ده، وحالته Delivered
             var order = await _context.Orders
                 .Include(o => o.Items)
                 .FirstOrDefaultAsync(o => o.Id == dto.OrderId && o.CustomerId == userId);
@@ -37,18 +36,15 @@ namespace YumQuick.Api.Controllers
             if (order.Status != OrderStatus.Delivered)
                 return BadRequest(new { Message = "You can only review delivered orders." });
 
-            // 2. التأكد إن المنتج ده فعلاً كان جوه الأوردر ده
             if (!order.Items.Any(i => i.ProductId == dto.ProductId))
                 return BadRequest(new { Message = "This product is not in the specified order." });
 
-            // 3. التأكد إن العميل مقيمش المنتج ده في الأوردر ده قبل كده (منع التكرار)
             var existingReview = await _context.Reviews
                 .AnyAsync(r => r.OrderId == dto.OrderId && r.ProductId == dto.ProductId && r.UserId == userId);
 
             if (existingReview)
                 return BadRequest(new { Message = "You have already reviewed this product for this order." });
 
-            // 4. حفظ التقييم بناءً على الكلاس بتاعك
             var review = new Review
             {
                 UserId = userId,
@@ -61,7 +57,6 @@ namespace YumQuick.Api.Controllers
             _context.Reviews.Add(review);
             await _context.SaveChangesAsync();
 
-            // 5. تحديث متوسط التقييم (RatingAvg) للمنتج
             var productReviews = await _context.Reviews
                 .Where(r => r.ProductId == dto.ProductId)
                 .ToListAsync();
