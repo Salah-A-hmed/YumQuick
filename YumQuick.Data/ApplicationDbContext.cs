@@ -20,6 +20,7 @@ namespace YumQuick.Data
         public DbSet<CartItemVariant> CartItemVariants { get; set; }
         public DbSet<Order> Orders { get; set; }
         public DbSet<OrderItem> OrderItems { get; set; }
+        public DbSet<OrderItemVariant> OrderItemVariants { get; set; }
         public DbSet<Review> Reviews { get; set; }
         public DbSet<Banner> Banners { get; set; }
         public DbSet<CancelReason> CancelReasons { get; set; }
@@ -92,6 +93,12 @@ namespace YumQuick.Data
                 .HasOne(cv => cv.Variant)
                 .WithMany()
                 .HasForeignKey(cv => cv.VariantId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<OrderItemVariant>()
+                .HasOne(ov => ov.Variant)
+                .WithMany()
+                .HasForeignKey(ov => ov.VariantId)
                 .OnDelete(DeleteBehavior.Restrict);
         }
     }

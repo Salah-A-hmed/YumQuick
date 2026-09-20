@@ -11,8 +11,7 @@ namespace YumQuick.Core.Entities
         public Order Order { get; set; }
         public int ProductId { get; set; }
         public Product Product { get; set; }
-        public int? VariantId { get; set; }
-        public ProductVariant Variant { get; set; }
+        public ICollection<OrderItemVariant> SelectedVariants { get; set; } = new List<OrderItemVariant>();
         public int Quantity { get; set; }
         public decimal UnitPriceSnapshot { get; set; } // السعر وقت الطلب
     }
