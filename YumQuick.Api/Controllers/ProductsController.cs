@@ -23,15 +23,20 @@ namespace YumQuick.Api.Controllers
 
         // GET: api/Products
         [HttpGet]
-        public async Task<IActionResult> GetProducts([FromQuery] int categoryId, [FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 10)
+        public async Task<IActionResult> GetProducts([FromQuery] int? categoryId, [FromQuery] int pageNumber = 1, [FromQuery] int pageSize = 10)
         {
             pageSize = pageSize > 50 ? 50 : pageSize;
-
             var query = _context.Products
                 .Include(p => p.Variants)
                 .Include(p => p.Category)
-                .Where(p => p.CategoryId == categoryId || p.Category.ParentCategoryId == categoryId)
                 .AsQueryable();
+            if (categoryId != null)
+            {
+                 query = query
+                    .Where(p => p.CategoryId == categoryId || p.Category.ParentCategoryId == categoryId)
+                    .AsQueryable();
+            }
+
 
             var totalItems = await query.CountAsync();
             var totalPages = (int)Math.Ceiling(totalItems / (double)pageSize);
@@ -267,6 +272,53 @@ namespace YumQuick.Api.Controllers
             return Ok(new { Message = "Product created successfully", ProductId = product.Id });
         }
 
+
+        // PUT: api/Products/{id}
+        [HttpPut("{id}")]
+        [Authorize(Roles = "RestaurantManager")]
+        public async Task<IActionResult> UpdateProduct(int id, [FromForm] UpdateProductDto dto)
+        {
+            var product = await _context.Products.FindAsync(id);
+            if (product == null) return NotFound("Product not found");
+
+            if (dto.CategoryId.HasValue)
+            {
+                var categoryExists = await _context.Categories.AnyAsync(c => c.Id == dto.CategoryId.Value);
+                if (!categoryExists) return BadRequest("Category does not exist.");
+                product.CategoryId = dto.CategoryId.Value;
+            }
+
+            if (!string.IsNullOrEmpty(dto.Name)) product.Name = dto.Name;
+            if (!string.IsNullOrEmpty(dto.Description)) product.Description = dto.Description;
+            if (dto.OriginalPrice.HasValue) product.OriginalPrice = dto.OriginalPrice.Value;
+            if (dto.DiscountPercent.HasValue) product.DiscountPercent = dto.DiscountPercent.Value;
+            if (dto.IsAvailable.HasValue) product.IsAvailable = dto.IsAvailable.Value;
+            if (dto.IsBestSeller.HasValue) product.IsBestSeller = dto.IsBestSeller.Value;
+            if (dto.IsNew.HasValue) product.IsNew = dto.IsNew.Value;
+
+            if (dto.Image != null)
+            {
+                var imageUrl = await _imageService.UploadImageAsync(dto.Image);
+                if (!string.IsNullOrEmpty(imageUrl)) product.ImageUrl = imageUrl;
+            }
+
+            await _context.SaveChangesAsync();
+            return Ok(new { Message = "Product updated successfully" });
+        }
+
+        // DELETE: api/Products/{id}
+        [HttpDelete("{id}")]
+        [Authorize(Roles = "RestaurantManager")]
+        public async Task<IActionResult> DeleteProduct(int id)
+        {
+            var product = await _context.Products.FindAsync(id);
+            if (product == null) return NotFound("Product not found");
+
+            _context.Products.Remove(product);
+            await _context.SaveChangesAsync();
+            return Ok(new { Message = "Product deleted successfully" });
+        }
+
         // POST: api/Products/{productId}/variants
         [HttpPost("{productId}/variants")]
         [Authorize(Roles = "RestaurantManager")]
@@ -287,5 +339,34 @@ namespace YumQuick.Api.Controllers
 
             return Ok(new { Message = "Variant added successfully", VariantId = variant.Id });
         }
+
+        // PUT: api/Products/variants/{variantId}
+        [HttpPut("variants/{variantId}")]
+        [Authorize(Roles = "RestaurantManager")]
+        public async Task<IActionResult> UpdateVariant(int variantId, [FromBody] UpdateVariantDto dto)
+        {
+            var variant = await _context.ProductVariants.FindAsync(variantId);
+            if (variant == null) return NotFound("Variant not found");
+
+            if (!string.IsNullOrEmpty(dto.Name)) variant.Name = dto.Name;
+            if (dto.ExtraPrice.HasValue) variant.ExtraPrice = dto.ExtraPrice.Value;
+
+            await _context.SaveChangesAsync();
+            return Ok(new { Message = "Variant updated successfully" });
+        }
+
+        // DELETE: api/Products/variants/{variantId}
+        [HttpDelete("variants/{variantId}")]
+        [Authorize(Roles = "RestaurantManager")]
+        public async Task<IActionResult> DeleteVariant(int variantId)
+        {
+            var variant = await _context.ProductVariants.FindAsync(variantId);
+            if (variant == null) return NotFound("Variant not found");
+
+            _context.ProductVariants.Remove(variant);
+            await _context.SaveChangesAsync();
+            return Ok(new { Message = "Variant deleted successfully" });
+        }
+
     }
 }
