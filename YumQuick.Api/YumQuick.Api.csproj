@@ -5,6 +5,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- SixLabors ImageSharp Community License -->
+	<NoWarn>$(NoWarn);NU1903</NoWarn>
+	 <NuGetAudit>false</NuGetAudit>
     <SixLaborsLicenseKey>Community</SixLaborsLicenseKey>
   </PropertyGroup>
 

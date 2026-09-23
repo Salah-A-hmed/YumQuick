@@ -25,7 +25,9 @@ namespace YumQuick.Data
         public DbSet<Banner> Banners { get; set; }
         public DbSet<CancelReason> CancelReasons { get; set; }
         public DbSet<FAQ> FAQs { get; set; }
-        public DbSet<ContactInfo> ContactInfos { get; set; }
+        public DbSet<ContactInfo> ContactInfos { get; set; }    
+        public DbSet<Ticket> Tickets { get; set; }
+        public DbSet<TicketMessage> TicketMessages { get; set; }
 
         protected override void OnModelCreating(ModelBuilder builder)
         {
@@ -100,6 +102,18 @@ namespace YumQuick.Data
                 .WithMany()
                 .HasForeignKey(ov => ov.VariantId)
                 .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<TicketMessage>()
+                .HasOne(tm => tm.Sender)
+                .WithMany()
+                .HasForeignKey(tm => tm.SenderId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            builder.Entity<TicketMessage>()
+                .HasOne(tm => tm.Ticket)
+                .WithMany(t => t.Messages)
+                .HasForeignKey(tm => tm.TicketId)
+                .OnDelete(DeleteBehavior.Cascade);
         }
     }
 }
