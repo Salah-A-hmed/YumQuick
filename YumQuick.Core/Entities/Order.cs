@@ -29,6 +29,10 @@ namespace YumQuick.Core.Entities
 
         public decimal TotalAmount { get; set; }
 
+        public PaymentStatus PaymentStatus { get; set; } = PaymentStatus.Pending;
+        public string? PaymentMethod { get; set; } // مثلاً: Cash, Fawry
+        public string? FawryRefNumber { get; set; }
+
         public int? CancelReasonId { get; set; }
         public CancelReason CancelReason { get; set; }
 

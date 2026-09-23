@@ -1,10 +1,12 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using System.Security.Claims;
 using YumQuick.Core.DTOs;
 using YumQuick.Core.Entities;
 using YumQuick.Core.Enums;
+using YumQuick.Core.Interfaces;
 using YumQuick.Data;
 
 namespace YumQuick.Api.Controllers
@@ -15,10 +17,17 @@ namespace YumQuick.Api.Controllers
     public class OrdersController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly IFawryPaymentService _fawryService;
+        private readonly FawrySettings _fawrySettings;
 
-        public OrdersController(ApplicationDbContext context)
+        public OrdersController(
+            ApplicationDbContext context,
+            IFawryPaymentService fawryService,
+            IOptions<FawrySettings> fawrySettings)
         {
             _context = context;
+            _fawryService = fawryService;
+            _fawrySettings = fawrySettings.Value;
         }
 
         // POST: api/Orders/checkout
@@ -98,6 +107,8 @@ namespace YumQuick.Api.Controllers
                 CustomerId = userId,
                 AddressId = dto.AddressId,
                 Status = OrderStatus.Pending,
+                PaymentMethod = dto.PaymentMethod,
+                PaymentStatus = PaymentStatus.Pending,
                 Subtotal = subtotal,
                 DeliveryFee = deliveryFee,
                 TaxFee = taxFee,
@@ -108,17 +119,65 @@ namespace YumQuick.Api.Controllers
             };
 
             _context.Orders.Add(order);
-
             _context.CartItems.RemoveRange(cart.Items);
+            await _context.SaveChangesAsync(); // تم حفظ الطلب وأخذ Id
 
-            await _context.SaveChangesAsync();
-
-            return Ok(new
+            // 1. الدفع كاش
+            if (dto.PaymentMethod == "Cash")
             {
-                Message = "Order placed successfully",
-                OrderId = order.Id,
-                TotalAmount = order.TotalAmount
-            });
+                return Ok(new { Message = "Order placed successfully", OrderId = order.Id });
+            }
+
+            // 2. الدفع ببطاقة جديدة
+            else if (dto.PaymentMethod == "NewCard")
+            {
+                var merchantRefNum = $"YUM-{order.Id}-{DateTime.UtcNow.Ticks}";
+                order.FawryRefNumber = merchantRefNum;
+                await _context.SaveChangesAsync();
+
+                var signature = _fawryService.GenerateSignature(merchantRefNum, userId, order.TotalAmount);
+
+                return Ok(new
+                {
+                    Message = "Initiate Payment",
+                    OrderId = order.Id,
+                    FawryRefNumber = merchantRefNum,
+                    MerchantCode = _fawrySettings.MerchantCode,
+                    Amount = order.TotalAmount.ToString("0.00"),
+                    Signature = signature
+                });
+            }
+
+            // 3. الدفع ببطاقة محفوظة
+            else if (dto.PaymentMethod == "SavedCard")
+            {
+                if (!dto.SavedCardId.HasValue) return BadRequest("SavedCardId is required.");
+
+                var savedCard = await _context.SavedCards.FirstOrDefaultAsync(c => c.Id == dto.SavedCardId && c.UserId == userId);
+                if (savedCard == null) return NotFound("Saved card not found.");
+
+                var merchantRefNum = $"YUM-{order.Id}-TOK-{DateTime.UtcNow.Ticks}";
+                order.FawryRefNumber = merchantRefNum;
+                await _context.SaveChangesAsync();
+
+                // في فوري، عشان تخصم من كارت محفوظ (Token)، بتحتاج تعمل Request من الباك إند بتاعك لسيرفر فوري مباشرة.
+                var paymentResult = await _fawryService.ChargeTokenizedCardAsync(merchantRefNum, savedCard.Token, order.TotalAmount, userId);
+
+                if (paymentResult)
+                {
+                    // العملية قُبلت مبدئياً، فوري سترسل تأكيداً نهائياً على الـ Webhook
+                    return Ok(new { Message = "Order placed. Payment processing via saved card.", OrderId = order.Id });
+                }
+                else
+                {
+                    // إذا فشل الاتصال بفوري أو رُفض الكارت
+                    order.PaymentStatus = PaymentStatus.Failed;
+                    await _context.SaveChangesAsync();
+                    return BadRequest("Failed to process payment with the saved card.");
+                }
+            }
+
+            return BadRequest("Invalid Payment Method");
         }
 
         // GET: api/Orders

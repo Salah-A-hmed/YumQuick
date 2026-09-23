@@ -28,6 +28,7 @@ namespace YumQuick.Data
         public DbSet<ContactInfo> ContactInfos { get; set; }    
         public DbSet<Ticket> Tickets { get; set; }
         public DbSet<TicketMessage> TicketMessages { get; set; }
+        public DbSet<SavedCard> SavedCards { get; set; }
 
         protected override void OnModelCreating(ModelBuilder builder)
         {

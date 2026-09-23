@@ -4,10 +4,11 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using System.Text;
+using YumQuick.Api.Services;
+using YumQuick.Core.DTOs;
 using YumQuick.Core.Entities;
 using YumQuick.Core.Interfaces;
 using YumQuick.Data;
-using YumQuick.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -69,7 +70,11 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
+builder.Services.AddHttpClient();
 builder.Services.AddScoped<IImageService, CloudinaryImageService>();
+builder.Services.Configure<FawrySettings>(builder.Configuration.GetSection("Fawry"));
+builder.Services.AddScoped<IFawryPaymentService, FawryPaymentService>();
+
 var app = builder.Build();
 
 // Seed Default Roles
