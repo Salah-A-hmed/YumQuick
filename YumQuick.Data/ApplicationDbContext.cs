@@ -30,7 +30,7 @@ namespace YumQuick.Data
         public DbSet<TicketMessage> TicketMessages { get; set; }
         public DbSet<SavedCard> SavedCards { get; set; }
         public DbSet<Notification> Notifications { get; set; }
-
+        public DbSet<DeviceToken> DeviceTokens { get; set; }
         protected override void OnModelCreating(ModelBuilder builder)
         {
             base.OnModelCreating(builder);

@@ -1,3 +1,5 @@
+using FirebaseAdmin;
+using Google.Apis.Auth.OAuth2;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -69,6 +71,17 @@ builder.Services.AddAuthentication(options =>
         ValidAudience = builder.Configuration["Jwt:Audience"],
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]))
     };
+});
+
+var firebaseConfigPath = Path.Combine(builder.Environment.ContentRootPath, "firebase-config.json");
+GoogleCredential googleCredential;
+using (var stream = File.OpenRead(firebaseConfigPath))
+{
+    googleCredential = GoogleCredential.FromStream(stream);
+}
+var firebaseApp = FirebaseApp.Create(new AppOptions
+{
+    Credential = googleCredential
 });
 
 builder.Services.AddHttpClient();

@@ -1,9 +1,10 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
-using System.Linq;
+using YumQuick.Core.Entities;
 using YumQuick.Data;
 
 namespace YumQuick.Api.Controllers
@@ -54,6 +55,30 @@ namespace YumQuick.Api.Controllers
             await _context.SaveChangesAsync();
 
             return Ok(new { Message = "Notification marked as read." });
+        }
+
+        // POST: api/Notifications/save-token
+        [HttpPost("save-token")]
+        public async Task<IActionResult> SaveDeviceToken([FromBody] string token)
+        {
+            if (string.IsNullOrWhiteSpace(token)) return BadRequest("Token is required.");
+
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            // التحقق مما إذا كان التوكن مسجلاً مسبقاً لهذا المستخدم لتجنب التكرار
+            var tokenExists = await _context.DeviceTokens.AnyAsync(t => t.UserId == userId && t.Token == token);
+
+            if (!tokenExists)
+            {
+                _context.DeviceTokens.Add(new DeviceToken
+                {
+                    UserId = userId,
+                    Token = token
+                });
+                await _context.SaveChangesAsync();
+            }
+
+            return Ok(new { Message = "Device token saved successfully." });
         }
     }
 }
