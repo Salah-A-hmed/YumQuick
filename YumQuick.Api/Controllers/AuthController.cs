@@ -76,7 +76,9 @@ namespace YumQuick.Api.Controllers
 
             if (user == null || !await _userManager.CheckPasswordAsync(user, model.Password))
                 return Unauthorized(new { Message = "Invalid email/phone or password." });
-
+           
+            if (user.IsDeleted)
+                return Unauthorized(new { Message = "This account has been deactivated." });
             var userRoles = await _userManager.GetRolesAsync(user);
 
             var authClaims = new List<Claim>
@@ -144,6 +146,8 @@ namespace YumQuick.Api.Controllers
                         return BadRequest(new { Message = "Failed to create user from Google." });
                     }
                 }
+                if (user.IsDeleted)
+                    return Unauthorized(new { Message = "This account has been deactivated." });
 
                 var userRoles = await _userManager.GetRolesAsync(user);
                 var authClaims = new List<Claim>
