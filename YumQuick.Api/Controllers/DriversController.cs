@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
+using YumQuick.Api.Services;
 using YumQuick.Core.DTOs;
 using YumQuick.Core.Enums;
 using YumQuick.Data;
@@ -14,10 +15,12 @@ namespace YumQuick.Api.Controllers
     public class DriversController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly INotificationService _notificationService;
 
-        public DriversController(ApplicationDbContext context)
+        public DriversController(ApplicationDbContext context, INotificationService notificationService)
         {
             _context = context;
+            _notificationService = notificationService;
         }
 
         // GET: api/Drivers/available-orders
@@ -60,6 +63,11 @@ namespace YumQuick.Api.Controllers
 
             await _context.SaveChangesAsync();
 
+            await _notificationService.SendNotificationAsync(
+                    order.CustomerId,
+                    "Order Update",
+                    "The delivery is on his way."
+                );
             return Ok(new { Message = "Order accepted successfully.", OrderId = order.Id });
         }
 
@@ -82,6 +90,12 @@ namespace YumQuick.Api.Controllers
             order.DeliveredAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
+
+            await _notificationService.SendNotificationAsync(
+                    order.CustomerId,
+                    "Order Delivered",
+                    "Your order has been delivered."
+                );
 
             return Ok(new { Message = "Order delivered successfully." });
         }

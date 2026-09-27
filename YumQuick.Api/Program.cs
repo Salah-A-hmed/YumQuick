@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using System.Text;
+using YumQuick.Api.Hubs;
 using YumQuick.Api.Services;
 using YumQuick.Core.DTOs;
 using YumQuick.Core.Entities;
@@ -74,6 +75,8 @@ builder.Services.AddHttpClient();
 builder.Services.AddScoped<IImageService, CloudinaryImageService>();
 builder.Services.Configure<FawrySettings>(builder.Configuration.GetSection("Fawry"));
 builder.Services.AddScoped<IFawryPaymentService, FawryPaymentService>();
+builder.Services.AddSignalR();
+builder.Services.AddScoped<INotificationService, NotificationService>();
 
 var app = builder.Build();
 
@@ -95,5 +98,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<NotificationHub>("/hubs/notifications");
 
 app.Run();

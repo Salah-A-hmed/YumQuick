@@ -6,6 +6,7 @@ using YumQuick.Core.DTOs;
 using YumQuick.Core.Entities;
 using YumQuick.Core.Enums;
 using YumQuick.Data;
+using YumQuick.Api.Services;
 
 namespace YumQuick.Api.Controllers
 {
@@ -15,10 +16,12 @@ namespace YumQuick.Api.Controllers
     public class TicketsController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly INotificationService _notificationService;
 
-        public TicketsController(ApplicationDbContext context)
+        public TicketsController(ApplicationDbContext context, INotificationService notificationService)
         {
             _context = context;
+            _notificationService = notificationService;
         }
 
         // GET: api/Tickets
@@ -152,6 +155,15 @@ namespace YumQuick.Api.Controllers
 
             await _context.SaveChangesAsync();
 
+            if (userId != ticket.UserId)
+            {
+                await _notificationService.SendNotificationAsync(
+                    ticket.UserId,
+                    "Support Ticket Update",
+                    $"There is a new reply to your ticket: {ticket.Subject}"
+                );
+            }
+
             return Ok(new { Message = "Reply sent successfully." });
         }
 
@@ -168,6 +180,12 @@ namespace YumQuick.Api.Controllers
 
             await _context.SaveChangesAsync();
 
+            await _notificationService.SendNotificationAsync(
+                ticket.UserId,
+                "Ticket Closed",
+                $"Your support ticket '{ticket.Subject}' has been closed."
+            );
+            
             return Ok(new { Message = "Ticket closed successfully." });
         }
     }

@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using YumQuick.Api.Services;
 using YumQuick.Core.DTOs;
 using YumQuick.Core.Entities;
 using YumQuick.Core.Interfaces;
@@ -14,11 +15,13 @@ namespace YumQuick.Api.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IImageService _imageService;
+        private readonly INotificationService _notificationService;
 
-        public ProductsController(ApplicationDbContext context, IImageService imageService)
+        public ProductsController(ApplicationDbContext context, IImageService imageService, INotificationService notificationService)
         {
             _context = context;
             _imageService = imageService;
+            _notificationService = notificationService;
         }
 
         // GET: api/Products
@@ -368,5 +371,55 @@ namespace YumQuick.Api.Controllers
             return Ok(new { Message = "Variant deleted successfully" });
         }
 
+        // إضافة دالة لإشعار إضافة منتج جديد
+        // POST: api/Products/{id}/notify-new-product
+        [HttpPost("{id}/notify-new-product")]
+        [Authorize(Roles = "RestaurantManager")]
+        public async Task<IActionResult> NotifyNewProduct(int id)
+        {
+            var product = await _context.Products.FindAsync(id);
+            if (product == null) return NotFound("Product not found.");
+
+            var users = await _context.Users.ToListAsync();
+
+            foreach (var user in users)
+            {
+                await _notificationService.SendNotificationAsync(
+                    user.Id,
+                    "New Product",
+                    $"We have added a product you might like: {product.Name}."
+                );
+            }
+
+            return Ok(new { Message = "Notifications sent for the new product." });
+        }
+
+        // إضافة دالة لإشعار العروض على المنتجات المفضلة
+        // POST: api/Products/{id}/notify-promotion
+        [HttpPost("{id}/notify-promotion")]
+        [Authorize(Roles = "RestaurantManager")]
+        public async Task<IActionResult> NotifyPromotionOnFavorite(int id)
+        {
+            var product = await _context.Products.FindAsync(id);
+            if (product == null) return NotFound("Product not found.");
+
+            var usersWithFavorite = await _context.Favorites
+                .Where(f => f.ProductId == id)
+                .Select(f => f.UserId)
+                .Distinct()
+                .ToListAsync();
+
+            foreach (var userId in usersWithFavorite)
+            {
+                await _notificationService.SendNotificationAsync(
+                    userId,
+                    "Promotion Alert",
+                    "One of your favorite is on promotion."
+                );
+            }
+
+            return Ok(new { Message = "Promotion notifications sent to users who favorited this product." });
+        }
     }
+
 }
