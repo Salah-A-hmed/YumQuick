@@ -1,4 +1,4 @@
-    *Access the Swagger UI at: `https://yumquick.tryasp.net/swagger/index.html`*
+*Access the Swagger UI at: `https://yumquick.tryasp.net/swagger/index.html`*
 
 # YumQuick API 🍔🚀
 
