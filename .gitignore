@@ -13,4 +13,4 @@ obj/
 # Logs
 *.log
 firebase-config.json
-appsettings.json
+YumQuick.Api/appsettings.json
