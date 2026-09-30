@@ -2,7 +2,7 @@
 
 # YumQuick API 🍔🚀
 
-YumQuick is a robust, full-featured backend API for a modern single-restaurant food delivery application. Built with **ASP.NET Core**, it provides a complete ecosystem for customers, delivery drivers, and restaurant managers. 
+YumQuick is a robust, full-featured backend API for a modern single-restaurant food delivery application. Built with **ASP.NET Core**, it provides a complete ecosystem for customers, delivery drivers, and restaurant managers.
 
 This project demonstrates advanced backend concepts including N-Tier architecture, secure third-party payment integration, real-time communication, and push notifications.
 
@@ -11,7 +11,7 @@ This project demonstrates advanced backend concepts including N-Tier architectur
 *   **Role-Based Access Control (RBAC):** Secure endpoints for Customers, Drivers, and Restaurant Managers using JWT authentication.
 *   **Smart Catalog & Cart:** Manage products, categories, variants, and a persistent shopping cart.
 *   **Advanced Order Management:** State-machine based order tracking (Pending -> Preparing -> Ready -> OnTheWay -> Delivered).
-*   **Payment Gateway Integration:** Integrated with FawryPay for cash, tokenized saved cards, and webhook validation via SHA-256 signatures.
+*   **Payment Gateway Integration:** Integrated with Stripe for secure card payments, supporting tokenized saved cards, PaymentIntent architecture, and asynchronous webhook validation.
 *   **Real-Time Tracking:** SignalR integration for instant order status updates and driver location tracking.
 *   **Push Notifications:** Firebase Cloud Messaging (FCM) integration for offline notifications.
 *   **Customer Support Ticketing:** Built-in system for users to raise issues and managers to resolve them.
@@ -32,6 +32,7 @@ This project demonstrates advanced backend concepts including N-Tier architectur
 *   [.NET 8 SDK](https://dotnet.microsoft.com/download)
 *   SQL Server
 *   Firebase Account (for push notifications)
+*   Stripe Account (for payment processing and Webhooks)
 
 ### Installation
 
@@ -40,15 +41,14 @@ This project demonstrates advanced backend concepts including N-Tier architectur
     git clone [https://github.com/yourusername/YumQuick.git](https://github.com/yourusername/YumQuick.git)
     cd YumQuick
     ```
-
-2.  **Configure Database:**
+2.  **Configure Database & Secrets:**
     Update the `DefaultConnection` string in `YumQuick.Api/appsettings.json` to point to your local SQL Server instance.
+    Add your Stripe API keys (`SecretKey` and `WebhookSecret`) to `appsettings.json`.
 
 3.  **Apply Migrations:**
     ```bash
     dotnet ef database update --project YumQuick.Data --startup-project YumQuick.Api
     ```
-
 4.  **Firebase Setup:**
     *   Create a Firebase project.
     *   Download the Service Account JSON file.
@@ -74,16 +74,18 @@ Welcome to the YumQuick API! This section outlines the standard flow to consume 
 
 ### 2. Browsing & Cart Management
 *   **Fetch Menu:** Use `GET /api/products` to load the catalog.
-*   **Manage Cart:** 
+*   **Manage Cart:**
     *   Add items: `POST /api/cart/add` (Specify productId, quantity, and variant IDs if any).
     *   View cart: `GET /api/cart`
     *   *Note: The cart is linked to the user's account, so it persists across devices.*
 
-### 3. Checkout & Payment Flow
-*   **Place Order:** Call `POST /api/orders` with the delivery address and payment method (`Cash`, `NewCard`, or `SavedCard`).
+### 3. Checkout & Payment Flow (Stripe Integration)
+*   **Place Order:** Call `POST /api/Orders/checkout` with the delivery address and payment method (`Cash`, `NewCard`, or `SavedCard`).
 *   **Payment Handling:**
-    *   If `SavedCard`, the API processes it server-to-server.
-    *   If `NewCard`, use the Fawry SDK on the frontend. The API expects Fawry to ping our Webhook (`POST /api/orders/fawry-webhook`) to confirm payment asynchronously.
+    *   If paying by card, the API generates a PaymentIntent and returns a `ClientSecret`.
+    *   Use the Stripe SDK on the frontend (e.g., `initPaymentSheet`) passing the `ClientSecret` to securely handle card inputs.
+    *   The API handles payment success or failure asynchronously by listening to Stripe events via Webhooks (`POST /api/payment/stripe-webhook`).
+*   **Save Card for Future Use:** Generate a `PaymentMethodId` using Stripe SDK and POST it to `api/PaymentMethods` along with `lastFourDigits` and `brand`.
 
 ### 4. Real-Time Order Tracking (SignalR)
 *   **Connect:** Establish a SignalR connection to `wss://yourdomain.com/hubs/notifications`.
