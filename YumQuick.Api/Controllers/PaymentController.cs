@@ -1,12 +1,10 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
-using System.Security.Claims;
-using YumQuick.Api.Services;
-using YumQuick.Core.DTOs;
+using Stripe;
+using Stripe.V2.Core;
+using System.IO;
 using YumQuick.Core.Enums;
-using YumQuick.Core.Interfaces;
 using YumQuick.Data;
 
 namespace YumQuick.Api.Controllers
@@ -16,50 +14,63 @@ namespace YumQuick.Api.Controllers
     public class PaymentController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        private readonly IFawryPaymentService _fawryService;
-        private readonly FawrySettings _fawrySettings;
+        private readonly IConfiguration _config;
 
-        public PaymentController(ApplicationDbContext context, IFawryPaymentService fawryService, IOptions<FawrySettings> fawrySettings)
+        public PaymentController(ApplicationDbContext context, IConfiguration config)
         {
             _context = context;
-            _fawryService = fawryService;
-            _fawrySettings = fawrySettings.Value;
+            _config = config;
         }
 
-        // POST: api/Payment/fawry-webhook
-        // هذه الدالة ستستدعيها خوادم فوري تلقائياً عند دفع العميل
-        [HttpPost("fawry-webhook")]
-        [AllowAnonymous] // فوري لا ترسل توكن تسجيل دخول، بل تعتمد على التوقيع المشفر
-        public async Task<IActionResult> FawryWebhook([FromBody] dynamic fawryPayload)
+        [HttpPost("stripe-webhook")]
+        [AllowAnonymous]
+        public async Task<IActionResult> StripeWebhook()
         {
-            // بناءً على توثيق فوري، استخراج البيانات من الـ Payload
-            string fawryRefNumber = fawryPayload.merchantRefNumber;
-            string orderStatus = fawryPayload.orderStatus; // "PAID", "CANCELED", "EXPIRED"
-            decimal paymentAmount = fawryPayload.paymentAmount;
-            string messageSignature = fawryPayload.messageSignature;
+            var json = await new StreamReader(HttpContext.Request.Body).ReadToEndAsync();
+            var endpointSecret = _config["Stripe:WebhookSecret"];
 
-            // البحث عن الطلب
-            var order = await _context.Orders.FirstOrDefaultAsync(o => o.FawryRefNumber == fawryRefNumber);
-            if (order == null) return Ok(); // إعادة Ok لفوري حتى لا تحاول الإرسال مجدداً
-
-            // يمكنك التحقق من صحة التوقيع هنا لزيادة الأمان باستخدام _fawryService.ValidateWebhookSignature
-
-            if (orderStatus == "PAID")
+            try
             {
-                order.PaymentStatus = PaymentStatus.Paid;
-                // إذا كان الطلب معلقاً، يتم تحويله للتحضير
-                if (order.Status == OrderStatus.Pending)
+                var stripeEvent = EventUtility.ConstructEvent(json, Request.Headers["Stripe-Signature"], endpointSecret);
+
+                if (stripeEvent.Type == "payment_intent.succeeded")
                 {
-                    order.Status = OrderStatus.Preparing;
-                }
-            }
-            else if (orderStatus == "CANCELED" || orderStatus == "EXPIRED")
-            {
-                order.PaymentStatus = PaymentStatus.Failed;
-            }
+                    var paymentIntent = stripeEvent.Data.Object as PaymentIntent;
 
-            await _context.SaveChangesAsync();
-            return Ok();
+                    if (paymentIntent.Metadata.TryGetValue("OrderId", out string orderIdString) && int.TryParse(orderIdString, out int orderId))
+                    {
+                        var order = await _context.Orders.FirstOrDefaultAsync(o => o.Id == orderId);
+                        if (order != null)
+                        {
+                            order.PaymentStatus = PaymentStatus.Paid;
+                            if (order.Status == OrderStatus.Pending)
+                            {
+                                order.Status = OrderStatus.Preparing;
+                            }
+                            await _context.SaveChangesAsync();
+                        }
+                    }
+                }
+                else if (stripeEvent.Type == "payment_intent.payment_failed")
+                {
+                    var paymentIntent = stripeEvent.Data.Object as PaymentIntent;
+                    if (paymentIntent.Metadata.TryGetValue("OrderId", out string orderIdString) && int.TryParse(orderIdString, out int orderId))
+                    {
+                        var order = await _context.Orders.FirstOrDefaultAsync(o => o.Id == orderId);
+                        if (order != null)
+                        {
+                            order.PaymentStatus = PaymentStatus.Failed;
+                            await _context.SaveChangesAsync();
+                        }
+                    }
+                }
+
+                return Ok();
+            }
+            catch (StripeException)
+            {
+                return BadRequest();
+            }
         }
     }
 }

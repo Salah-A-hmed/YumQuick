@@ -40,7 +40,6 @@ namespace YumQuick.Api.Controllers
         }
 
         // POST: api/PaymentMethods
-        // بيتم استدعاؤها بعد ما الموبايل ينجح في حفظ البطاقة مع Fawry SDK
         [HttpPost]
         public async Task<IActionResult> AddCard([FromBody] SaveCardDto dto)
         {

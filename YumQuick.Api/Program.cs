@@ -12,7 +12,7 @@ using YumQuick.Core.DTOs;
 using YumQuick.Core.Entities;
 using YumQuick.Core.Interfaces;
 using YumQuick.Data;
-
+using Stripe;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -73,9 +73,20 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
+StripeConfiguration.ApiKey = builder.Configuration["Stripe:SecretKey"];
+
 var firebaseConfigPath = Path.Combine(builder.Environment.ContentRootPath, "firebase-config.json");
 GoogleCredential googleCredential;
-using (var stream = File.OpenRead(firebaseConfigPath))
+using (var stream = System.IO.File.OpenRead(firebaseConfigPath))
 {
     googleCredential = GoogleCredential.FromStream(stream);
 }
@@ -86,10 +97,10 @@ var firebaseApp = FirebaseApp.Create(new AppOptions
 
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<IImageService, CloudinaryImageService>();
-builder.Services.Configure<FawrySettings>(builder.Configuration.GetSection("Fawry"));
-builder.Services.AddScoped<IFawryPaymentService, FawryPaymentService>();
+builder.Services.AddScoped<IPaymentService, StripePaymentService>();
 builder.Services.AddSignalR();
 builder.Services.AddScoped<INotificationService, NotificationService>();
+
 
 var app = builder.Build();
 
@@ -105,6 +116,7 @@ app.UseSwaggerUI();
 
 
 app.UseHttpsRedirection();
+app.UseCors("AllowAll");
 
 // 3. Authentication & Authorization Middleware
 app.UseAuthentication();

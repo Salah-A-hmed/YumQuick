@@ -17,17 +17,12 @@ namespace YumQuick.Api.Controllers
     public class OrdersController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        private readonly IFawryPaymentService _fawryService;
-        private readonly FawrySettings _fawrySettings;
+        private readonly IPaymentService _paymentService;
 
-        public OrdersController(
-            ApplicationDbContext context,
-            IFawryPaymentService fawryService,
-            IOptions<FawrySettings> fawrySettings)
+        public OrdersController(ApplicationDbContext context, IPaymentService paymentService)
         {
             _context = context;
-            _fawryService = fawryService;
-            _fawrySettings = fawrySettings.Value;
+            _paymentService = paymentService;
         }
 
         // POST: api/Orders/checkout
@@ -35,22 +30,17 @@ namespace YumQuick.Api.Controllers
         public async Task<IActionResult> Checkout([FromBody] CheckoutDto dto)
         {
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (string.IsNullOrEmpty(userId))
-                return Unauthorized();
+            if (string.IsNullOrEmpty(userId)) return Unauthorized();
 
             var address = await _context.Addresses.FirstOrDefaultAsync(a => a.Id == dto.AddressId && a.UserId == userId);
             if (address == null) return BadRequest("Invalid delivery address.");
 
             var cart = await _context.Carts
-                .Include(c => c.Items)
-                    .ThenInclude(i => i.Product)
-                .Include(c => c.Items)
-                    .ThenInclude(i => i.SelectedVariants)
-                        .ThenInclude(sv => sv.Variant)
+                .Include(c => c.Items).ThenInclude(i => i.Product)
+                .Include(c => c.Items).ThenInclude(i => i.SelectedVariants).ThenInclude(sv => sv.Variant)
                 .FirstOrDefaultAsync(c => c.UserId == userId);
 
-            if (cart == null || !cart.Items.Any())
-                return BadRequest("Your cart is empty.");
+            if (cart == null || !cart.Items.Any()) return BadRequest("Your cart is empty.");
 
             decimal subtotal = 0;
             var orderItems = new List<OrderItem>();
@@ -59,11 +49,10 @@ namespace YumQuick.Api.Controllers
             {
                 var productFinalPrice = cartItem.Product.OriginalPrice - (cartItem.Product.OriginalPrice * (cartItem.Product.DiscountPercent / 100m));
                 var variantsPrice = cartItem.SelectedVariants.Sum(v => v.Variant.ExtraPrice);
-
                 var unitPrice = productFinalPrice + variantsPrice;
                 subtotal += unitPrice * cartItem.Quantity;
 
-                var orderItem = new OrderItem
+                orderItems.Add(new OrderItem
                 {
                     ProductId = cartItem.ProductId,
                     Quantity = cartItem.Quantity,
@@ -73,8 +62,7 @@ namespace YumQuick.Api.Controllers
                         VariantId = v.VariantId,
                         ExtraPriceSnapshot = v.Variant.ExtraPrice
                     }).ToList()
-                };
-                orderItems.Add(orderItem);
+                });
             }
 
             decimal discountAmount = 0;
@@ -83,8 +71,7 @@ namespace YumQuick.Api.Controllers
             if (!string.IsNullOrEmpty(dto.CouponCode))
             {
                 appliedCoupon = await _context.Coupons.FirstOrDefaultAsync(c =>
-                    c.Code == dto.CouponCode &&
-                    c.IsActive &&
+                    c.Code == dto.CouponCode && c.IsActive &&
                     (c.ExpiryDate == null || c.ExpiryDate > DateTime.UtcNow) &&
                     c.CurrentUses < c.MaxUses);
 
@@ -93,10 +80,7 @@ namespace YumQuick.Api.Controllers
                     discountAmount = subtotal * (appliedCoupon.DiscountPercentage / 100m);
                     appliedCoupon.CurrentUses++;
                 }
-                else
-                {
-                    return BadRequest("Invalid or expired coupon.");
-                }
+                else return BadRequest("Invalid or expired coupon.");
             }
 
             decimal deliveryFee = 15.00m;
@@ -120,34 +104,24 @@ namespace YumQuick.Api.Controllers
 
             _context.Orders.Add(order);
             _context.CartItems.RemoveRange(cart.Items);
-            await _context.SaveChangesAsync(); // تم حفظ الطلب وأخذ Id
+            await _context.SaveChangesAsync();
 
-            // 1. الدفع كاش
             if (dto.PaymentMethod == "Cash")
             {
                 return Ok(new { Message = "Order placed successfully", OrderId = order.Id });
             }
-
             // 2. الدفع ببطاقة جديدة
-            else if (dto.PaymentMethod == "NewCard")
+            else if (dto.PaymentMethod == "Card" || dto.PaymentMethod == "NewCard")
             {
-                var merchantRefNum = $"YUM-{order.Id}-{DateTime.UtcNow.Ticks}";
-                order.FawryRefNumber = merchantRefNum;
-                await _context.SaveChangesAsync();
-
-                var signature = _fawryService.GenerateSignature(merchantRefNum, userId, order.TotalAmount);
+                var clientSecret = await _paymentService.CreatePaymentIntentAsync(order);
 
                 return Ok(new
                 {
                     Message = "Initiate Payment",
                     OrderId = order.Id,
-                    FawryRefNumber = merchantRefNum,
-                    MerchantCode = _fawrySettings.MerchantCode,
-                    Amount = order.TotalAmount.ToString("0.00"),
-                    Signature = signature
+                    ClientSecret = clientSecret
                 });
             }
-
             // 3. الدفع ببطاقة محفوظة
             else if (dto.PaymentMethod == "SavedCard")
             {
@@ -156,30 +130,19 @@ namespace YumQuick.Api.Controllers
                 var savedCard = await _context.SavedCards.FirstOrDefaultAsync(c => c.Id == dto.SavedCardId && c.UserId == userId);
                 if (savedCard == null) return NotFound("Saved card not found.");
 
-                var merchantRefNum = $"YUM-{order.Id}-TOK-{DateTime.UtcNow.Ticks}";
-                order.FawryRefNumber = merchantRefNum;
-                await _context.SaveChangesAsync();
+                // هنعدل الـ Interface عشان يقبل الـ Token بتاع الكارت المحفوظ
+                var clientSecret = await _paymentService.CreatePaymentIntentAsync(order, savedCard.Token);
 
-                // في فوري، عشان تخصم من كارت محفوظ (Token)، بتحتاج تعمل Request من الباك إند بتاعك لسيرفر فوري مباشرة.
-                var paymentResult = await _fawryService.ChargeTokenizedCardAsync(merchantRefNum, savedCard.Token, order.TotalAmount, userId);
-
-                if (paymentResult)
+                return Ok(new
                 {
-                    // العملية قُبلت مبدئياً، فوري سترسل تأكيداً نهائياً على الـ Webhook
-                    return Ok(new { Message = "Order placed. Payment processing via saved card.", OrderId = order.Id });
-                }
-                else
-                {
-                    // إذا فشل الاتصال بفوري أو رُفض الكارت
-                    order.PaymentStatus = PaymentStatus.Failed;
-                    await _context.SaveChangesAsync();
-                    return BadRequest("Failed to process payment with the saved card.");
-                }
+                    Message = "Initiate Payment with Saved Card",
+                    OrderId = order.Id,
+                    ClientSecret = clientSecret
+                });
             }
-
             return BadRequest("Invalid Payment Method");
         }
-
+        
         // GET: api/Orders
         [HttpGet]
         public async Task<IActionResult> GetMyOrders([FromQuery] string? filter)
