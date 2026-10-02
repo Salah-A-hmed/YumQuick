@@ -68,7 +68,7 @@ namespace YumQuick.Api.Controllers
 
             return Ok(orders);
         }
-        // GET: api/Orders/{id}
+        // GET: api/Admin/Orders/{id}
         [HttpGet("{id}")]
         public async Task<IActionResult> GetOrderDetails(int id)
         {
@@ -120,7 +120,7 @@ namespace YumQuick.Api.Controllers
             return Ok(result);
         }
 
-        // POST: api/Orders/{id}/prepare
+        // POST: api/Admin/Orders/{id}/prepare
         [HttpPost("{id}/prepare")]
         [Authorize(Roles = "RestaurantManager")]
         public async Task<IActionResult> MarkOrderAsPreparing(int id)
@@ -137,7 +137,7 @@ namespace YumQuick.Api.Controllers
             return Ok(new { Message = "Order is now being prepared." });
         }
 
-        // POST: api/Orders/{id}/ready
+        // POST: api/Admin/Orders/{id}/ready
         [HttpPost("{id}/ready")]
         [Authorize(Roles = "RestaurantManager")]
         public async Task<IActionResult> MarkOrderAsReady(int id)
@@ -154,7 +154,7 @@ namespace YumQuick.Api.Controllers
             return Ok(new { Message = "Order is ready for delivery." });
         }
 
-        // POST: api/Orders/{id}/assign
+        // POST: api/Admin/Orders/{id}/assign
 
         [HttpPost("{id}/assign")]
         public async Task<IActionResult> AssignOrderToDriver(int id, [FromBody] AssignDriverDto dto)
