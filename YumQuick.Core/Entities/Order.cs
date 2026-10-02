@@ -11,7 +11,7 @@ namespace YumQuick.Core.Entities
         public string CustomerId { get; set; }
         public ApplicationUser Customer { get; set; }
 
-        public string DriverId { get; set; } // Nullable till driver accepts
+        public string? DriverId { get; set; }
         public ApplicationUser Driver { get; set; }
 
         public int AddressId { get; set; }

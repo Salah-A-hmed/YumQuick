@@ -142,7 +142,7 @@ namespace YumQuick.Api.Controllers
             }
             return BadRequest("Invalid Payment Method");
         }
-        
+
         // GET: api/Orders
         [HttpGet]
         public async Task<IActionResult> GetMyOrders([FromQuery] string? filter)
@@ -183,7 +183,7 @@ namespace YumQuick.Api.Controllers
 
             return Ok(orders);
         }
-        
+
         // GET: api/Orders/{id}
         [HttpGet("{id}")]
         public async Task<IActionResult> GetOrderById(int id)
@@ -254,38 +254,5 @@ namespace YumQuick.Api.Controllers
             return Ok(new { Message = "Order cancelled successfully." });
         }
 
-        // POST: api/Orders/{id}/prepare
-        [HttpPost("{id}/prepare")]
-        [Authorize(Roles = "RestaurantManager")]
-        public async Task<IActionResult> MarkOrderAsPreparing(int id)
-        {
-            var order = await _context.Orders.FirstOrDefaultAsync(o => o.Id == id);
-            if (order == null) return NotFound(new { Message = "Order not found." });
-
-            if (order.Status != OrderStatus.Pending)
-                return BadRequest(new { Message = "Order must be 'Pending' to start preparing." });
-
-            order.Status = OrderStatus.Preparing;
-            await _context.SaveChangesAsync();
-
-            return Ok(new { Message = "Order is now being prepared." });
-        }
-
-        // POST: api/Orders/{id}/ready
-        [HttpPost("{id}/ready")]
-        [Authorize(Roles = "RestaurantManager")]
-        public async Task<IActionResult> MarkOrderAsReady(int id)
-        {
-            var order = await _context.Orders.FirstOrDefaultAsync(o => o.Id == id);
-            if (order == null) return NotFound(new { Message = "Order not found." });
-
-            if (order.Status != OrderStatus.Preparing)
-                return BadRequest(new { Message = "Order must be 'Preparing' before it can be marked as ready." });
-
-            order.Status = OrderStatus.ReadyForDelivery;
-            await _context.SaveChangesAsync();
-
-            return Ok(new { Message = "Order is ready for delivery." });
-        }
     }
 }
