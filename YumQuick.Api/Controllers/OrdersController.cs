@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Stripe;
 using System.Security.Claims;
 using YumQuick.Core.DTOs;
 using YumQuick.Core.Entities;
@@ -25,31 +26,84 @@ namespace YumQuick.Api.Controllers
             _paymentService = paymentService;
         }
 
-        // POST: api/Orders/checkout
+
         [HttpPost("checkout")]
         public async Task<IActionResult> Checkout([FromBody] CheckoutDto dto)
         {
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (string.IsNullOrEmpty(userId)) return Unauthorized();
 
-            var address = await _context.Addresses.FirstOrDefaultAsync(a => a.Id == dto.AddressId && a.UserId == userId);
-            if (address == null) return BadRequest("Invalid delivery address.");
+            if (string.IsNullOrEmpty(userId))
+                return Unauthorized();
 
+            // 1. Validate payment method first
+            var paymentMethod = dto.PaymentMethod?.Trim();
+
+            if (paymentMethod != "Cash" &&
+                paymentMethod != "Card" &&
+                paymentMethod != "NewCard" &&
+                paymentMethod != "SavedCard")
+            {
+                return BadRequest("Invalid Payment Method.");
+            }
+
+            // 2. Validate address
+            var address = await _context.Addresses
+                .FirstOrDefaultAsync(a =>
+                    a.Id == dto.AddressId &&
+                    a.UserId == userId);
+
+            if (address == null)
+                return BadRequest("Invalid delivery address.");
+
+            // 3. Validate saved card before creating the order
+            SavedCard? savedCard = null;
+
+            if (paymentMethod == "SavedCard")
+            {
+                if (!dto.SavedCardId.HasValue)
+                    return BadRequest("SavedCardId is required.");
+
+                savedCard = await _context.SavedCards
+                    .FirstOrDefaultAsync(c =>
+                        c.Id == dto.SavedCardId.Value &&
+                        c.UserId == userId);
+
+                if (savedCard == null)
+                    return NotFound("Saved card not found.");
+            }
+
+            // 4. Load cart
             var cart = await _context.Carts
-                .Include(c => c.Items).ThenInclude(i => i.Product)
-                .Include(c => c.Items).ThenInclude(i => i.SelectedVariants).ThenInclude(sv => sv.Variant)
+                .Include(c => c.Items)
+                    .ThenInclude(i => i.Product)
+                .Include(c => c.Items)
+                    .ThenInclude(i => i.SelectedVariants)
+                        .ThenInclude(sv => sv.Variant)
                 .FirstOrDefaultAsync(c => c.UserId == userId);
 
-            if (cart == null || !cart.Items.Any()) return BadRequest("Your cart is empty.");
+            if (cart == null || !cart.Items.Any())
+                return BadRequest("Your cart is empty.");
 
-            decimal subtotal = 0;
+            // 5. Calculate subtotal and order items
+            decimal subtotal = 0m;
             var orderItems = new List<OrderItem>();
 
             foreach (var cartItem in cart.Items)
             {
-                var productFinalPrice = cartItem.Product.OriginalPrice - (cartItem.Product.OriginalPrice * (cartItem.Product.DiscountPercent / 100m));
-                var variantsPrice = cartItem.SelectedVariants.Sum(v => v.Variant.ExtraPrice);
-                var unitPrice = productFinalPrice + variantsPrice;
+                var productFinalPrice = Math.Round(
+                    cartItem.Product.OriginalPrice *
+                    (1m - cartItem.Product.DiscountPercent / 100m),
+                    2,
+                    MidpointRounding.AwayFromZero);
+
+                var variantsPrice = cartItem.SelectedVariants
+                    .Sum(v => v.Variant.ExtraPrice);
+
+                var unitPrice = Math.Round(
+                    productFinalPrice + variantsPrice,
+                    2,
+                    MidpointRounding.AwayFromZero);
+
                 subtotal += unitPrice * cartItem.Quantity;
 
                 orderItems.Add(new OrderItem
@@ -57,90 +111,138 @@ namespace YumQuick.Api.Controllers
                     ProductId = cartItem.ProductId,
                     Quantity = cartItem.Quantity,
                     UnitPriceSnapshot = unitPrice,
-                    SelectedVariants = cartItem.SelectedVariants.Select(v => new OrderItemVariant
-                    {
-                        VariantId = v.VariantId,
-                        ExtraPriceSnapshot = v.Variant.ExtraPrice
-                    }).ToList()
+
+                    SelectedVariants = cartItem.SelectedVariants
+                        .Select(v => new OrderItemVariant
+                        {
+                            VariantId = v.VariantId,
+                            ExtraPriceSnapshot = v.Variant.ExtraPrice
+                        })
+                        .ToList()
                 });
             }
 
-            decimal discountAmount = 0;
-            Coupon? appliedCoupon = null;
+            subtotal = Math.Round(
+                subtotal, 2, MidpointRounding.AwayFromZero);
 
-            if (!string.IsNullOrEmpty(dto.CouponCode))
+            // 6. Validate coupon
+            decimal discountAmount = 0m;
+            YumQuick.Core.Entities.Coupon? appliedCoupon = null;
+
+            if (!string.IsNullOrWhiteSpace(dto.CouponCode))
             {
-                appliedCoupon = await _context.Coupons.FirstOrDefaultAsync(c =>
-                    c.Code == dto.CouponCode && c.IsActive &&
-                    (c.ExpiryDate == null || c.ExpiryDate > DateTime.UtcNow) &&
-                    c.CurrentUses < c.MaxUses);
+                var couponCode = dto.CouponCode.Trim();
 
-                if (appliedCoupon != null)
-                {
-                    discountAmount = subtotal * (appliedCoupon.DiscountPercentage / 100m);
-                    appliedCoupon.CurrentUses++;
-                }
-                else return BadRequest("Invalid or expired coupon.");
+                appliedCoupon = await _context.Coupons
+                    .FirstOrDefaultAsync(c =>
+                        c.Code == couponCode &&
+                        c.IsActive &&
+                        (c.ExpiryDate == null ||
+                         c.ExpiryDate > DateTime.UtcNow) &&
+                        c.CurrentUses < c.MaxUses);
+
+                if (appliedCoupon == null)
+                    return BadRequest("Invalid or expired coupon.");
+
+                discountAmount = Math.Round(
+                    subtotal * appliedCoupon.DiscountPercentage / 100m,
+                    2,
+                    MidpointRounding.AwayFromZero);
             }
 
-            decimal deliveryFee = 15.00m;
-            decimal taxFee = (subtotal - discountAmount) * 0.14m;
+            // 7. Calculate final amounts
+            const decimal deliveryFee = 15.00m;
 
+            var taxFee = Math.Round(
+                (subtotal - discountAmount) * 0.14m,
+                2,
+                MidpointRounding.AwayFromZero);
+
+            var totalAmount = Math.Round(
+                subtotal - discountAmount + deliveryFee + taxFee,
+                2,
+                MidpointRounding.AwayFromZero);
+
+            // 8. Create order
             var order = new Order
             {
                 CustomerId = userId,
                 AddressId = dto.AddressId,
                 Status = OrderStatus.Pending,
-                PaymentMethod = dto.PaymentMethod,
+                PaymentMethod = paymentMethod,
                 PaymentStatus = PaymentStatus.Pending,
+
                 Subtotal = subtotal,
                 DeliveryFee = deliveryFee,
                 TaxFee = taxFee,
                 CouponId = appliedCoupon?.Id,
                 DiscountAmount = discountAmount,
-                TotalAmount = (subtotal - discountAmount) + deliveryFee + taxFee,
+                TotalAmount = totalAmount,
+
                 Items = orderItems
             };
 
+            if (appliedCoupon != null)
+                appliedCoupon.CurrentUses++;
+
             _context.Orders.Add(order);
-            _context.CartItems.RemoveRange(cart.Items);
+
+            // Save first because Stripe metadata needs the OrderId.
             await _context.SaveChangesAsync();
 
-            if (dto.PaymentMethod == "Cash")
+            // 9. Cash payment
+            if (paymentMethod == "Cash")
             {
-                return Ok(new { Message = "Order placed successfully", OrderId = order.Id });
-            }
-            // 2. الدفع ببطاقة جديدة
-            else if (dto.PaymentMethod == "Card" || dto.PaymentMethod == "NewCard")
-            {
-                var clientSecret = await _paymentService.CreatePaymentIntentAsync(order);
+                _context.CartItems.RemoveRange(cart.Items);
+                await _context.SaveChangesAsync();
 
                 return Ok(new
                 {
-                    Message = "Initiate Payment",
+                    Message = "Order placed successfully",
+                    OrderId = order.Id
+                });
+            }
+
+            // 10. Card payment
+            try
+            {
+                var clientSecret = await _paymentService
+                    .CreatePaymentIntentAsync(
+                        order,
+                        paymentMethod == "SavedCard"
+                            ? savedCard!.Token
+                            : null);
+
+                // PaymentIntent creation succeeded; now clear the cart.
+                _context.CartItems.RemoveRange(cart.Items);
+                await _context.SaveChangesAsync();
+
+                return Ok(new
+                {
+                    Message = paymentMethod == "SavedCard"
+                        ? "Initiate Payment with Saved Card"
+                        : "Initiate Payment",
+
                     OrderId = order.Id,
                     ClientSecret = clientSecret
                 });
             }
-            // 3. الدفع ببطاقة محفوظة
-            else if (dto.PaymentMethod == "SavedCard")
+            catch (StripeException)
             {
-                if (!dto.SavedCardId.HasValue) return BadRequest("SavedCardId is required.");
+                // Stripe could not create the PaymentIntent.
+                // Remove the incomplete order and restore coupon usage.
+                _context.Orders.Remove(order);
 
-                var savedCard = await _context.SavedCards.FirstOrDefaultAsync(c => c.Id == dto.SavedCardId && c.UserId == userId);
-                if (savedCard == null) return NotFound("Saved card not found.");
+                if (appliedCoupon != null)
+                    appliedCoupon.CurrentUses--;
 
-                // هنعدل الـ Interface عشان يقبل الـ Token بتاع الكارت المحفوظ
-                var clientSecret = await _paymentService.CreatePaymentIntentAsync(order, savedCard.Token);
+                await _context.SaveChangesAsync();
 
-                return Ok(new
+                return StatusCode(502, new
                 {
-                    Message = "Initiate Payment with Saved Card",
-                    OrderId = order.Id,
-                    ClientSecret = clientSecret
+                    Message = "Unable to initiate card payment. Please try again."
                 });
             }
-            return BadRequest("Invalid Payment Method");
         }
 
         // GET: api/Orders

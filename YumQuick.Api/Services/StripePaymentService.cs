@@ -16,27 +16,39 @@ namespace YumQuick.Api.Services
             _config = config;
         }
 
-        public async Task<string> CreatePaymentIntentAsync(Order order, string? paymentMethodToken = null)
+        public async Task<string> CreatePaymentIntentAsync(
+            Order order,
+            string? paymentMethodToken = null)
         {
+            var amountInCents = (long)Math.Round(
+                order.TotalAmount * 100m,
+                0,
+                MidpointRounding.AwayFromZero);
+
             var options = new PaymentIntentCreateOptions
             {
-                Amount = (long)(order.TotalAmount * 100),
+                Amount = amountInCents,
                 Currency = "usd",
-                PaymentMethodTypes = new List<string> { "card" },
+
+                PaymentMethodTypes = new List<string>
+        {
+            "card"
+        },
+
                 Metadata = new Dictionary<string, string>
-                {
-                    { "OrderId", order.Id.ToString() },
-                    { "UserId", order.CustomerId }
-                }
+        {
+            { "OrderId", order.Id.ToString() },
+            { "UserId", order.CustomerId }
+        }
             };
 
-            // لو العميل اختار كارت محفوظ، بنقول لسترايب يستخدمه فوراً
-            if (!string.IsNullOrEmpty(paymentMethodToken))
+            if (!string.IsNullOrWhiteSpace(paymentMethodToken))
             {
                 options.PaymentMethod = paymentMethodToken;
             }
 
             var service = new PaymentIntentService();
+
             var paymentIntent = await service.CreateAsync(options);
 
             return paymentIntent.ClientSecret;

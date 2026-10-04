@@ -87,6 +87,7 @@ namespace YumQuick.Api.Controllers
             }
 
             order.Status = OrderStatus.Delivered;
+            order.PaymentStatus = PaymentStatus.Paid; // Assuming payment is completed upon delivery
             order.DeliveredAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
