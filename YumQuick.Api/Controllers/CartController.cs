@@ -36,20 +36,24 @@ namespace YumQuick.Api.Controllers
 
             if (cart == null || !cart.Items.Any())
             {
-                return Ok(new { Message = "Cart is empty", Items = new List<object>(), TotalCartPrice = 0 });
+                return Ok(new
+                {
+                    Message = "Cart is empty",
+                    Items = new List<object>(),
+                    TotalCartPrice = 0m
+                });
             }
-
-            decimal totalCartPrice = 0;
 
             var itemsResponse = cart.Items.Select(i =>
             {
-                var productFinalPrice = i.Product.OriginalPrice - (i.Product.OriginalPrice * (i.Product.DiscountPercent / 100m));
-                var variantsPrice = i.SelectedVariants.Sum(v => v.Variant.ExtraPrice);
+                var productFinalPrice = i.Product.OriginalPrice
+                    * (1 - i.Product.DiscountPercent / 100m);
+
+                var variantsPrice = i.SelectedVariants
+                    .Sum(sv => sv.Variant.ExtraPrice);
 
                 var unitPrice = productFinalPrice + variantsPrice;
                 var totalItemPrice = unitPrice * i.Quantity;
-
-                totalCartPrice += totalItemPrice;
 
                 return new
                 {
@@ -60,17 +64,26 @@ namespace YumQuick.Api.Controllers
                     i.Quantity,
                     UnitPrice = unitPrice,
                     TotalItemPrice = totalItemPrice,
-                    SelectedVariants = i.SelectedVariants.Select(v => new
-                    {
-                        v.Variant.Id,
-                        v.Variant.Name,
-                        v.Variant.ExtraPrice
-                    })
-                };
-            });
 
-            return Ok(new { Items = itemsResponse, TotalCartPrice = totalCartPrice });
+                    SelectedVariants = i.SelectedVariants.Select(sv => new
+                    {
+                        sv.Variant.Id,
+                        sv.Variant.Name,
+                        sv.Variant.ExtraPrice
+                    }).ToList()
+                };
+            }).ToList();
+
+            var totalCartPrice = itemsResponse
+                .Sum(i => i.TotalItemPrice);
+
+            return Ok(new
+            {
+                Items = itemsResponse,
+                TotalCartPrice = totalCartPrice
+            });
         }
+
 
         [HttpPost("add")]
         public async Task<IActionResult> AddToCart([FromBody] AddToCartDto dto)
