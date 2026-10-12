@@ -7,7 +7,7 @@ namespace YumQuick.Core.DTOs
 {
     public class CancelOrderDto
     {
-        [Required]
-        public int CancelReasonId { get; set; }
+        public int? CancelReasonId { get; set; }
+        public string? CustomCancelReason { get; set; }
     }
 }

@@ -334,27 +334,76 @@ namespace YumQuick.Api.Controllers
 
         // PUT: api/Orders/{id}/cancel
         [HttpPut("{id}/cancel")]
-        public async Task<IActionResult> CancelOrder(int id, [FromBody] CancelOrderDto dto)
-        {
-            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        public async Task<IActionResult> CancelOrder(
+            int id,
+            [FromBody] CancelOrderDto dto)
+                {
+                    var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
-            var order = await _context.Orders.FirstOrDefaultAsync(o => o.Id == id && o.CustomerId == userId);
+                    var order = await _context.Orders
+                        .FirstOrDefaultAsync(o => o.Id == id && o.CustomerId == userId);
 
-            if (order == null) return NotFound(new { Message = "Order not found." });
+                    if (order == null)
+                        return NotFound(new { Message = "Order not found." });
 
-            if (order.Status != OrderStatus.Pending)
-                return BadRequest(new { Message = "Order cannot be canceled at this stage." });
+                    if (order.Status != OrderStatus.Pending)
+                        return BadRequest(new
+                        {
+                            Message = "Order cannot be canceled at this stage."
+                        });
 
-            var reasonExists = await _context.CancelReasons.AnyAsync(r => r.Id == dto.CancelReasonId && r.IsActive);
-            if (!reasonExists) return BadRequest(new { Message = "Invalid cancel reason." });
+                    // User selected a predefined reason
+                    if (dto.CancelReasonId.HasValue)
+                    {
+                        var reasonExists = await _context.CancelReasons.AnyAsync(
+                            r => r.Id == dto.CancelReasonId.Value && r.IsActive);
 
-            order.Status = OrderStatus.Cancelled;
-            order.CancelReasonId = dto.CancelReasonId;
+                        if (!reasonExists)
+                            return BadRequest(new { Message = "Invalid cancel reason." });
 
-            await _context.SaveChangesAsync();
+                        order.CancelReasonId = dto.CancelReasonId.Value;
+                    }
+                    // User entered a custom reason
+                    else
+                    {
+                        if (string.IsNullOrWhiteSpace(dto.CustomCancelReason))
+                        {
+                            return BadRequest(new
+                            {
+                                Message = "Please select a cancel reason or enter a custom reason."
+                            });
+                        }
 
-            return Ok(new { Message = "Order cancelled successfully." });
-        }
+                        var customReason = dto.CustomCancelReason.Trim();
+
+                        if (customReason.Length > 500)
+                        {
+                            return BadRequest(new
+                            {
+                                Message = "Cancel reason cannot exceed 500 characters."
+                            });
+                        }
+
+                        var newReason = new CancelReason
+                        {
+                            Text = customReason,
+                            IsActive = true
+                        };
+
+                        _context.CancelReasons.Add(newReason);
+
+                        // Save to generate the new reason ID
+                        await _context.SaveChangesAsync();
+
+                        order.CancelReasonId = newReason.Id;
+                    }
+
+                    order.Status = OrderStatus.Cancelled;
+
+                    await _context.SaveChangesAsync();
+
+                    return Ok(new { Message = "Order cancelled successfully." });
+                }
 
         //POST /api/Orders/{orderId}/reorder
         [HttpPost("{orderId}/reorder")]
