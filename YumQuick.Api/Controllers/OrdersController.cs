@@ -356,5 +356,334 @@ namespace YumQuick.Api.Controllers
             return Ok(new { Message = "Order cancelled successfully." });
         }
 
+        //POST /api/Orders/{orderId}/reorder
+        [HttpPost("{orderId}/reorder")]
+        public async Task<IActionResult> Reorder(
+            int orderId,
+            [FromBody] ReorderDto dto)
+        {
+            var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            if (string.IsNullOrEmpty(userId))
+                return Unauthorized();
+
+            // 1. Get the old order, making sure it belongs to this customer.
+            var oldOrder = await _context.Orders
+                .Include(o => o.Items)
+                    .ThenInclude(i => i.Product)
+                .Include(o => o.Items)
+                    .ThenInclude(i => i.SelectedVariants)
+                        .ThenInclude(v => v.Variant)
+                .FirstOrDefaultAsync(o =>
+                    o.Id == orderId && o.CustomerId == userId);
+
+            if (oldOrder == null)
+                return NotFound(new { Message = "Order not found." });
+
+            if (oldOrder.Items == null || !oldOrder.Items.Any())
+                return BadRequest(new { Message = "The old order has no items." });
+
+            // 2. Validate the requested action.
+            var action = dto.Action?.Trim();
+
+            if (action == null ||
+                (!action.Equals("AddToCart", StringComparison.OrdinalIgnoreCase) &&
+                 !action.Equals("Checkout", StringComparison.OrdinalIgnoreCase)))
+            {
+                return BadRequest(new
+                {
+                    Message = "Action must be AddToCart or Checkout."
+                });
+            }
+
+            // 3. Check that all old products are still available
+            // and that their variants still belong to those products.
+            foreach (var oldItem in oldOrder.Items)
+            {
+                if (oldItem.Product == null || !oldItem.Product.IsAvailable)
+                {
+                    return BadRequest(new
+                    {
+                        Message = $"Product ID {oldItem.ProductId} is no longer available."
+                    });
+                }
+
+                if (oldItem.Quantity <= 0)
+                {
+                    return BadRequest(new
+                    {
+                        Message = $"Invalid quantity for product ID {oldItem.ProductId}."
+                    });
+                }
+
+                foreach (var selectedVariant in oldItem.SelectedVariants)
+                {
+                    if (selectedVariant.Variant == null ||
+                        selectedVariant.Variant.ProductId != oldItem.ProductId)
+                    {
+                        return BadRequest(new
+                        {
+                            Message = $"A variant for product ID {oldItem.ProductId} is no longer valid."
+                        });
+                    }
+                }
+            }
+
+            // 4. Option A: Add the old order's items to the existing cart.
+            if (action.Equals("AddToCart", StringComparison.OrdinalIgnoreCase))
+            {
+                var cart = await _context.Carts
+                    .Include(c => c.Items)
+                        .ThenInclude(i => i.SelectedVariants)
+                    .FirstOrDefaultAsync(c => c.UserId == userId);
+
+                if (cart == null)
+                {
+                    cart = new Cart { UserId = userId };
+                    _context.Carts.Add(cart);
+                    await _context.SaveChangesAsync();
+                }
+
+                foreach (var oldItem in oldOrder.Items)
+                {
+                    var variantIds = oldItem.SelectedVariants
+                        .Select(v => v.VariantId)
+                        .OrderBy(id => id)
+                        .ToList();
+
+                    var existingItem = cart.Items.FirstOrDefault(i =>
+                        i.ProductId == oldItem.ProductId &&
+                        i.SelectedVariants
+                            .Select(v => v.VariantId)
+                            .OrderBy(id => id)
+                            .SequenceEqual(variantIds));
+
+                    if (existingItem != null)
+                    {
+                        existingItem.Quantity += oldItem.Quantity;
+                    }
+                    else
+                    {
+                        var newItem = new CartItem
+                        {
+                            CartId = cart.Id,
+                            ProductId = oldItem.ProductId,
+                            Quantity = oldItem.Quantity,
+                            SelectedVariants = oldItem.SelectedVariants
+                                .Select(v => new CartItemVariant
+                                {
+                                    VariantId = v.VariantId
+                                })
+                                .ToList()
+                        };
+
+                        _context.CartItems.Add(newItem);
+                    }
+                }
+
+                await _context.SaveChangesAsync();
+
+                return Ok(new
+                {
+                    Message = "Order items added to cart successfully."
+                });
+            }
+
+            // 5. Option B: Checkout directly from the old order's items.
+            // Use the old values when the customer leaves the fields empty.
+            var addressId = dto.AddressId ?? oldOrder.AddressId;
+            var paymentMethod = string.IsNullOrWhiteSpace(dto.PaymentMethod)
+                ? oldOrder.PaymentMethod
+                : dto.PaymentMethod.Trim();
+
+            if (string.IsNullOrWhiteSpace(paymentMethod) ||
+                (paymentMethod != "Cash" &&
+                 paymentMethod != "Card" &&
+                 paymentMethod != "NewCard" &&
+                 paymentMethod != "SavedCard"))
+            {
+                return BadRequest(new
+                {
+                    Message = "Please choose a valid payment method."
+                });
+            }
+
+            var address = await _context.Addresses.FirstOrDefaultAsync(a =>
+                a.Id == addressId && a.UserId == userId);
+
+            if (address == null)
+                return BadRequest(new { Message = "Invalid delivery address." });
+
+            // If SavedCard is selected, use the provided card.
+            // If omitted, fall back to the customer's default saved card.
+            SavedCard? savedCard = null;
+
+            if (paymentMethod == "SavedCard")
+            {
+                if (dto.SavedCardId.HasValue)
+                {
+                    savedCard = await _context.SavedCards.FirstOrDefaultAsync(c =>
+                        c.Id == dto.SavedCardId.Value &&
+                        c.UserId == userId);
+                }
+                else
+                {
+                    savedCard = await _context.SavedCards.FirstOrDefaultAsync(c =>
+                        c.UserId == userId && c.IsDefault);
+                }
+
+                if (savedCard == null)
+                {
+                    return BadRequest(new
+                    {
+                        Message = "No suitable saved card found. Please choose a card."
+                    });
+                }
+            }
+
+            // 6. Recalculate prices using current product and variant prices.
+            decimal subtotal = 0m;
+            var newOrderItems = new List<OrderItem>();
+
+            foreach (var oldItem in oldOrder.Items)
+            {
+                var productFinalPrice = Math.Round(
+                    oldItem.Product.OriginalPrice *
+                    (1m - oldItem.Product.DiscountPercent / 100m),
+                    2,
+                    MidpointRounding.AwayFromZero);
+
+                var variantsPrice = oldItem.SelectedVariants
+                    .Sum(v => v.Variant.ExtraPrice);
+
+                var unitPrice = Math.Round(
+                    productFinalPrice + variantsPrice,
+                    2,
+                    MidpointRounding.AwayFromZero);
+
+                subtotal += unitPrice * oldItem.Quantity;
+
+                newOrderItems.Add(new OrderItem
+                {
+                    ProductId = oldItem.ProductId,
+                    Quantity = oldItem.Quantity,
+                    UnitPriceSnapshot = unitPrice,
+                    SelectedVariants = oldItem.SelectedVariants
+                        .Select(v => new OrderItemVariant
+                        {
+                            VariantId = v.VariantId,
+                            ExtraPriceSnapshot = v.Variant.ExtraPrice
+                        })
+                        .ToList()
+                });
+            }
+
+            subtotal = Math.Round(subtotal, 2, MidpointRounding.AwayFromZero);
+
+            // 7. Apply only a coupon provided for this new order.
+            decimal discountAmount = 0m;
+            YumQuick.Core.Entities.Coupon? appliedCoupon = null;
+
+            if (!string.IsNullOrWhiteSpace(dto.CouponCode))
+            {
+                var couponCode = dto.CouponCode.Trim();
+
+                appliedCoupon = await _context.Coupons.FirstOrDefaultAsync(c =>
+                    c.Code == couponCode &&
+                    c.IsActive &&
+                    (c.ExpiryDate == null || c.ExpiryDate > DateTime.UtcNow) &&
+                    c.CurrentUses < c.MaxUses);
+
+                if (appliedCoupon == null)
+                {
+                    return BadRequest(new
+                    {
+                        Message = "Invalid or expired coupon."
+                    });
+                }
+
+                discountAmount = Math.Round(
+                    subtotal * appliedCoupon.DiscountPercentage / 100m,
+                    2,
+                    MidpointRounding.AwayFromZero);
+            }
+
+            const decimal deliveryFee = 15.00m;
+
+            var taxFee = Math.Round(
+                (subtotal - discountAmount) * 0.14m,
+                2,
+                MidpointRounding.AwayFromZero);
+
+            var totalAmount = Math.Round(
+                subtotal - discountAmount + deliveryFee + taxFee,
+                2,
+                MidpointRounding.AwayFromZero);
+
+            // 8. Create a completely new order.
+            var newOrder = new Order
+            {
+                CustomerId = userId,
+                AddressId = addressId,
+                Status = OrderStatus.Pending,
+                PaymentMethod = paymentMethod,
+                PaymentStatus = PaymentStatus.Pending,
+                Subtotal = subtotal,
+                DeliveryFee = deliveryFee,
+                TaxFee = taxFee,
+                CouponId = appliedCoupon?.Id,
+                DiscountAmount = discountAmount,
+                TotalAmount = totalAmount,
+                Items = newOrderItems
+            };
+
+            if (appliedCoupon != null)
+                appliedCoupon.CurrentUses++;
+
+            _context.Orders.Add(newOrder);
+            await _context.SaveChangesAsync();
+
+            // Do not read from or clear the customer's existing cart.
+            if (paymentMethod == "Cash")
+            {
+                return Ok(new
+                {
+                    Message = "Order placed successfully.",
+                    OrderId = newOrder.Id
+                });
+            }
+
+            // 9. Start card payment using the existing payment service.
+            try
+            {
+                var clientSecret = await _paymentService.CreatePaymentIntentAsync(
+                    newOrder,
+                    paymentMethod == "SavedCard" ? savedCard!.Token : null);
+
+                return Ok(new
+                {
+                    Message = paymentMethod == "SavedCard"
+                        ? "Initiate Payment with Saved Card"
+                        : "Initiate Payment",
+                    OrderId = newOrder.Id,
+                    ClientSecret = clientSecret
+                });
+            }
+            catch (StripeException)
+            {
+                _context.Orders.Remove(newOrder);
+
+                if (appliedCoupon != null)
+                    appliedCoupon.CurrentUses--;
+
+                await _context.SaveChangesAsync();
+
+                return StatusCode(502, new
+                {
+                    Message = "Unable to initiate card payment. Please try again."
+                });
+            }
+        }
+
     }
 }
