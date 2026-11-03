@@ -5,6 +5,6 @@ namespace YumQuick.Core.Interfaces
 {
     public interface IPaymentService
     {
-        Task<string> CreatePaymentIntentAsync(Order order, string? paymentMethodToken = null);
+        Task<string> CreatePaymentIntentAsync(Order order, string? paymentMethodToken = null, string? stripeCustomerId = null);
     }
 }

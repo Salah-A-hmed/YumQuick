@@ -1,6 +1,8 @@
 ﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Stripe;
 using System.Security.Claims;
 using YumQuick.Core.DTOs;
 using YumQuick.Core.Entities;
@@ -14,10 +16,12 @@ namespace YumQuick.Api.Controllers
     public class PaymentMethodsController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly UserManager<ApplicationUser> _userManager;
 
-        public PaymentMethodsController(ApplicationDbContext context)
+        public PaymentMethodsController(ApplicationDbContext context, UserManager<ApplicationUser> userManager)
         {
             _context = context;
+            _userManager = userManager;
         }
 
         // GET: api/PaymentMethods
@@ -44,6 +48,18 @@ namespace YumQuick.Api.Controllers
         public async Task<IActionResult> AddCard([FromBody] SaveCardDto dto)
         {
             var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+            var user = await _userManager.FindByIdAsync(userId);
+
+            // 1. هات أو أنشئ Customer لـ Stripe خاص باليوزر ده
+            string stripeCustomerId = await GetOrCreateStripeCustomerAsync(user);
+
+            // 2. اربط الـ PaymentMethod (الكارت) بالـ Customer ده في سترايب (هذه الخطوة تمنع ظهور الخطأ نهائياً)
+            var attachOptions = new PaymentMethodAttachOptions
+            {
+                Customer = stripeCustomerId,
+            };
+            var paymentMethodService = new PaymentMethodService();
+            var paymentMethod = await paymentMethodService.AttachAsync(dto.Token, attachOptions);
 
             // لو دي أول بطاقة، خليها الافتراضية
             var hasCards = await _context.SavedCards.AnyAsync(c => c.UserId == userId);
@@ -103,6 +119,34 @@ namespace YumQuick.Api.Controllers
 
             await _context.SaveChangesAsync();
             return Ok(new { Message = "Card deleted successfully." });
+        }
+        public async Task<string> GetOrCreateStripeCustomerAsync(ApplicationUser user)
+        {
+            // لو اليوزر عنده معرف سترايب مخزن مسبقاً، نرجعه مباشرة
+            if (!string.IsNullOrEmpty(user.StripeCustomerId))
+            {
+                return user.StripeCustomerId;
+            }
+
+            // لو مش موجود، بننشئ عَميل جديد في سترايب
+            var customerOptions = new CustomerCreateOptions
+            {
+                Email = user.Email,
+                Name = user.FullName,
+                Metadata = new Dictionary<string, string>
+        {
+            { "UserId", user.Id }
+        }
+            };
+
+            var customerService = new CustomerService();
+            var customer = await customerService.CreateAsync(customerOptions);
+
+            // نحفظ الـ CustomerId في الداتابيز عندنا المرتبطة بجدول الـ User
+            user.StripeCustomerId = customer.Id;
+            await _userManager.UpdateAsync(user);
+
+            return customer.Id;
         }
     }
 }

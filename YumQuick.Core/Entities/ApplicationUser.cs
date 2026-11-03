@@ -11,5 +11,6 @@ namespace YumQuick.Core.Entities
         public string AvatarUrl { get; set; }
         public DateTime? DateOfBirth { get; set; }
         public bool IsDeleted { get; set; } = false;
+        public string? StripeCustomerId { get; set; }
     }
 }

@@ -18,40 +18,51 @@ namespace YumQuick.Api.Services
 
         public async Task<string> CreatePaymentIntentAsync(
             Order order,
-            string? paymentMethodToken = null)
+            string? paymentMethodToken = null,
+            string? stripeCustomerId = null)
         {
-            var amountInCents = (long)Math.Round(
+            try
+            {
+                var amountInCents = (long)Math.Round(
                 order.TotalAmount * 100m,
                 0,
                 MidpointRounding.AwayFromZero);
 
-            var options = new PaymentIntentCreateOptions
-            {
-                Amount = amountInCents,
-                Currency = "usd",
+                var options = new PaymentIntentCreateOptions
+                {
+                    Amount = amountInCents,
+                    Currency = "usd",
 
-                PaymentMethodTypes = new List<string>
+                    PaymentMethodTypes = new List<string>
         {
             "card"
         },
+                    Customer = stripeCustomerId,
 
-                Metadata = new Dictionary<string, string>
+                    Metadata = new Dictionary<string, string>
         {
             { "OrderId", order.Id.ToString() },
             { "UserId", order.CustomerId }
         }
-            };
+                };
 
-            if (!string.IsNullOrWhiteSpace(paymentMethodToken))
-            {
-                options.PaymentMethod = paymentMethodToken;
+                if (!string.IsNullOrWhiteSpace(paymentMethodToken))
+                {
+                    options.PaymentMethod = paymentMethodToken;
+                    options.SetupFutureUsage = "off_session";
+                }
+
+                var service = new PaymentIntentService();
+
+                var paymentIntent = await service.CreateAsync(options);
+
+                return paymentIntent.ClientSecret;
             }
-
-            var service = new PaymentIntentService();
-
-            var paymentIntent = await service.CreateAsync(options);
-
-            return paymentIntent.ClientSecret;
+            catch (StripeException ex)
+            {
+                // التقاط خطأ سترايب بالتفصيل ورميه للكونترولر
+                throw new Exception($"Stripe API Error: {ex.Message}");
+            }
         }
     }
 }

@@ -1,8 +1,10 @@
 ﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Stripe;
+using Stripe.Climate;
 using System.Security.Claims;
 using YumQuick.Core.DTOs;
 using YumQuick.Core.Entities;
@@ -19,11 +21,13 @@ namespace YumQuick.Api.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IPaymentService _paymentService;
+        private readonly UserManager<IdentityUser> _userManager;
 
-        public OrdersController(ApplicationDbContext context, IPaymentService paymentService)
+        public OrdersController(ApplicationDbContext context, IPaymentService paymentService, UserManager<IdentityUser> userManager)
         {
             _context = context;
             _paymentService = paymentService;
+            _userManager = userManager;
         }
 
 
@@ -164,7 +168,7 @@ namespace YumQuick.Api.Controllers
                 MidpointRounding.AwayFromZero);
 
             // 8. Create order
-            var order = new Order
+            var order = new Core.Entities.Order
             {
                 CustomerId = userId,
                 AddressId = dto.AddressId,
@@ -206,12 +210,15 @@ namespace YumQuick.Api.Controllers
             // 10. Card payment
             try
             {
+                var user = await _userManager.FindByIdAsync(userId) as ApplicationUser;
+                string stripeCustomerId = user?.StripeCustomerId ?? string.Empty;
                 var clientSecret = await _paymentService
                     .CreatePaymentIntentAsync(
                         order,
                         paymentMethod == "SavedCard"
                             ? savedCard!.Token
-                            : null);
+                            : null,
+                        stripeCustomerId);
 
                 // PaymentIntent creation succeeded; now clear the cart.
                 _context.CartItems.RemoveRange(cart.Items);
@@ -670,7 +677,7 @@ namespace YumQuick.Api.Controllers
                 MidpointRounding.AwayFromZero);
 
             // 8. Create a completely new order.
-            var newOrder = new Order
+            var newOrder = new Core.Entities.Order
             {
                 CustomerId = userId,
                 AddressId = addressId,
@@ -705,9 +712,13 @@ namespace YumQuick.Api.Controllers
             // 9. Start card payment using the existing payment service.
             try
             {
-                var clientSecret = await _paymentService.CreatePaymentIntentAsync(
-                    newOrder,
-                    paymentMethod == "SavedCard" ? savedCard!.Token : null);
+                var user = await _userManager.FindByIdAsync(userId) as ApplicationUser;
+                string stripeCustomerId = user?.StripeCustomerId ?? string.Empty;
+                var clientSecret = await _paymentService
+                    .CreatePaymentIntentAsync(
+                        newOrder,
+                        paymentMethod == "SavedCard"? savedCard!.Token: null,
+                        stripeCustomerId);
 
                 return Ok(new
                 {
