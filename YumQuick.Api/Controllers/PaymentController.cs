@@ -37,8 +37,9 @@ namespace YumQuick.Api.Controllers
                 var stripeEvent = EventUtility.ConstructEvent(
                     json,
                     Request.Headers["Stripe-Signature"],
-                    endpointSecret);
-
+                    endpointSecret,
+                    throwOnApiVersionMismatch: false 
+                );
                 if (stripeEvent.Type != "payment_intent.succeeded" &&
                     stripeEvent.Type != "payment_intent.payment_failed")
                 {
@@ -99,9 +100,14 @@ namespace YumQuick.Api.Controllers
 
                 return Ok();
             }
-            catch (StripeException)
+            catch (StripeException ex)
             {
-                return BadRequest();
+                // إرجاع رسالة الخطأ الحقيقية لسترايب لنعرف سبب فشل التوقيع
+                return BadRequest(new { error = $"Stripe Exception: {ex.Message}" });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { error = $"General Exception: {ex.Message}" });
             }
         }
     }
