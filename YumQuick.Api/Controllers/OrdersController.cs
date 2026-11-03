@@ -21,9 +21,9 @@ namespace YumQuick.Api.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IPaymentService _paymentService;
-        private readonly UserManager<IdentityUser> _userManager;
+        private readonly UserManager<ApplicationUser> _userManager;
 
-        public OrdersController(ApplicationDbContext context, IPaymentService paymentService, UserManager<IdentityUser> userManager)
+        public OrdersController(ApplicationDbContext context, IPaymentService paymentService, UserManager<ApplicationUser> userManager)
         {
             _context = context;
             _paymentService = paymentService;
@@ -210,7 +210,7 @@ namespace YumQuick.Api.Controllers
             // 10. Card payment
             try
             {
-                var user = await _userManager.FindByIdAsync(userId) as ApplicationUser;
+                var user = await _userManager.FindByIdAsync(userId);
                 string stripeCustomerId = user?.StripeCustomerId ?? string.Empty;
                 var clientSecret = await _paymentService
                     .CreatePaymentIntentAsync(
@@ -248,6 +248,18 @@ namespace YumQuick.Api.Controllers
                 return StatusCode(502, new
                 {
                     Message = "Unable to initiate card payment. Please try again."
+                });
+            }
+            catch (Exception)
+            {
+                // Catch any other unexpected exceptions.
+                _context.Orders.Remove(order);
+                if (appliedCoupon != null)
+                    appliedCoupon.CurrentUses--;
+                await _context.SaveChangesAsync();
+                return StatusCode(500, new
+                {
+                    Message = "An unexpected error occurred. Please try again."
                 });
             }
         }
@@ -712,7 +724,7 @@ namespace YumQuick.Api.Controllers
             // 9. Start card payment using the existing payment service.
             try
             {
-                var user = await _userManager.FindByIdAsync(userId) as ApplicationUser;
+                var user = await _userManager.FindByIdAsync(userId);
                 string stripeCustomerId = user?.StripeCustomerId ?? string.Empty;
                 var clientSecret = await _paymentService
                     .CreatePaymentIntentAsync(

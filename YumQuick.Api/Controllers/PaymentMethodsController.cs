@@ -120,6 +120,7 @@ namespace YumQuick.Api.Controllers
             await _context.SaveChangesAsync();
             return Ok(new { Message = "Card deleted successfully." });
         }
+        [NonAction]
         public async Task<string> GetOrCreateStripeCustomerAsync(ApplicationUser user)
         {
             // لو اليوزر عنده معرف سترايب مخزن مسبقاً، نرجعه مباشرة
